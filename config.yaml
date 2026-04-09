@@ -1,11 +1,22 @@
 # Actuarial Bot Configuration
 # Copy this file to config.local.yaml and fill in your credentials
 
-openai:
-  api_key: "YOUR_OPENAI_API_KEY"
+# AI provider configuration
+# Supports: "openai", "azure", "custom" (Ollama, LM Studio, vLLM, etc.)
+ai:
+  provider: "openai"
+  api_key: "YOUR_API_KEY"
   model: "gpt-4o"
   temperature: 0.1
   max_tokens: 4096
+
+  # Azure OpenAI settings (only used when provider is "azure")
+  # azure_endpoint: "https://your-resource.openai.azure.com/"
+  # azure_deployment: "your-deployment-name"
+  # azure_api_version: "2024-10-21"
+
+  # Custom endpoint settings (only used when provider is "custom")
+  # base_url: "http://localhost:11434/v1"
 
 oracle:
   # TNS name from your tnsnames.ora
@@ -23,12 +34,11 @@ python:
   executable: "python"
   # Timeout in seconds for script execution
   timeout: 120
-  # Packages available in executor environment
-  packages:
-    - pandas
-    - numpy
-    - openpyxl
-    - matplotlib
+
+# Logging
+logging:
+  level: "INFO"
+  # log_dir: "~/Documents/actuarial-bot-logs"  # default
 
 # UI settings
 ui:

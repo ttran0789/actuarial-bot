@@ -1,6 +1,7 @@
 """OpenAI tool-use agent — the brain of the actuarial bot."""
 
 import json
+import logging
 from typing import Generator, Optional
 from openai import OpenAI
 
@@ -11,11 +12,13 @@ from db.schema import SchemaDiscovery
 from db.query import format_result_as_text, result_to_records, result_to_json
 from executor.python_runner import PythonRunner
 
+log = logging.getLogger("actuarial_bot.agent")
+
 
 class ActuarialAgent:
-    def __init__(self, api_key: str, model: str, oracle_conn: Optional[OracleConnection],
+    def __init__(self, client: OpenAI, model: str, oracle_conn: Optional[OracleConnection],
                  python_runner: PythonRunner, temperature: float = 0.1, max_tokens: int = 4096):
-        self.client = OpenAI(api_key=api_key)
+        self.client = client
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -28,32 +31,25 @@ class ActuarialAgent:
             prompt += "\n\nNOTE: Oracle database is not connected. You can still help with general actuarial questions, write SQL queries (without executing), and run Python scripts. If the user asks to run a query, explain that the database is not connected."
         self.messages: list[dict] = [{"role": "system", "content": prompt}]
         self.max_rows = 10000
-        # Stores the last query result for export
         self.last_result: Optional[dict] = None
         self.last_query: Optional[str] = None
+        log.info("Agent initialized (model=%s, demo_mode=%s)", model, self.demo_mode)
 
     def reset_conversation(self):
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self.last_result = None
         self.last_query = None
+        log.info("Conversation reset")
 
     def chat(self, user_message: str) -> Generator[dict, None, None]:
-        """Process a user message and yield response chunks.
-
-        Yields dicts with keys:
-          - {"type": "text", "content": "..."} — text content from the assistant
-          - {"type": "tool_call", "name": "...", "args": {...}} — tool being called
-          - {"type": "tool_result", "name": "...", "content": "..."} — tool result
-          - {"type": "sql_preview", "sql": "...", "explanation": "..."} — SQL preview
-          - {"type": "query_result", "result": {...}, "text": "..."} — query result data
-          - {"type": "warning", "content": "..."} — reasonability warning
-          - {"type": "python_result", "result": {...}} — python execution result
-          - {"type": "error", "content": "..."} — error message
-          - {"type": "done"} — conversation turn complete
-        """
+        """Process a user message and yield response chunks."""
+        log.info("User message: %s", user_message[:200])
         self.messages.append({"role": "user", "content": user_message})
 
+        turn = 0
         while True:
+            turn += 1
+            log.debug("API call (turn %d, %d messages in context)", turn, len(self.messages))
             try:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -62,8 +58,11 @@ class ActuarialAgent:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
+                log.debug("API response: usage=%s, finish_reason=%s",
+                          response.usage, response.choices[0].finish_reason)
             except Exception as e:
-                yield {"type": "error", "content": f"OpenAI API error: {e}"}
+                log.error("LLM API error: %s", e, exc_info=True)
+                yield {"type": "error", "content": f"AI API error: {e}"}
                 yield {"type": "done"}
                 return
 
@@ -80,12 +79,12 @@ class ActuarialAgent:
                 ]
             self.messages.append(assistant_msg)
 
-            # Yield any text content
             if message.content:
+                log.info("Assistant response: %s", message.content[:200])
                 yield {"type": "text", "content": message.content}
 
-            # If no tool calls, we're done
             if not message.tool_calls:
+                log.debug("Turn complete (no tool calls)")
                 yield {"type": "done"}
                 return
 
@@ -97,9 +96,22 @@ class ActuarialAgent:
                 except json.JSONDecodeError:
                     args = {}
 
+                log.info("Tool call: %s(%s)", fn_name, json.dumps(args)[:300])
                 yield {"type": "tool_call", "name": fn_name, "args": args}
 
                 result_content = self._execute_tool(fn_name, args)
+
+                # Log tool result summary
+                if isinstance(result_content, dict):
+                    if "error" in result_content:
+                        log.warning("Tool %s error: %s", fn_name, result_content["error"])
+                    elif "columns" in result_content:
+                        log.info("Tool %s returned %d rows, %d columns",
+                                 fn_name, result_content.get("row_count", 0), len(result_content["columns"]))
+                    else:
+                        log.debug("Tool %s result: %s", fn_name, json.dumps(result_content)[:200])
+                elif isinstance(result_content, list):
+                    log.info("Tool %s returned %d items", fn_name, len(result_content))
 
                 # Yield specialized results based on tool type
                 if fn_name == "preview_query":
@@ -108,38 +120,36 @@ class ActuarialAgent:
                     if isinstance(result_content, dict) and "columns" in result_content:
                         text = format_result_as_text(result_content)
                         yield {"type": "query_result", "result": result_content, "text": text}
-                        # Run reasonability checks
                         warnings = check_query_result(
                             result_content["columns"], result_content["rows"],
                             context=args.get("sql", ""))
                         warning_text = format_warnings(warnings)
                         if warning_text:
+                            log.warning("Reasonability warnings: %s", warning_text)
                             yield {"type": "warning", "content": warning_text}
-                        # Store for export
                         self.last_result = result_content
                         self.last_query = args.get("sql", "")
                         result_str = result_to_json(result_content)
                     else:
                         result_str = json.dumps(result_content) if isinstance(result_content, dict) else str(result_content)
                 elif fn_name == "run_python":
+                    log.info("Python execution: success=%s", result_content.get("success"))
+                    if result_content.get("stderr"):
+                        log.warning("Python stderr: %s", result_content["stderr"][:500])
                     yield {"type": "python_result", "result": result_content}
                     result_str = json.dumps(result_content)
                 else:
                     result_str = json.dumps(result_content) if isinstance(result_content, dict) else str(result_content)
                     yield {"type": "tool_result", "name": fn_name, "content": result_str[:2000]}
 
-                # Add tool result to message history
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": result_str if isinstance(result_str, str) else json.dumps(result_str),
                 })
 
-            # Loop back to get the next response (agent may call more tools)
-
     def _execute_tool(self, name: str, args: dict):
         try:
-            # Database tools require Oracle connection
             db_tools = {"list_tables", "describe_table", "find_columns", "get_table_comments", "run_query", "sample_data"}
             if name in db_tools and self.demo_mode:
                 return {"error": "Oracle database is not connected. Running in demo mode."}
@@ -166,13 +176,14 @@ class ActuarialAgent:
 
             elif name == "run_query":
                 sql = args["sql"].strip()
-                # Safety: only allow SELECT
                 first_word = sql.split()[0].upper() if sql.split() else ""
                 if first_word not in ("SELECT", "WITH"):
                     return {"error": "Only SELECT queries are allowed. Use SELECT or WITH...SELECT."}
+                log.info("Executing SQL: %s", sql[:300])
                 return self.oracle.execute(sql, max_rows=self.max_rows)
 
             elif name == "run_python":
+                log.info("Executing Python script (%d chars)", len(args.get("code", "")))
                 return self.python.run(args["code"], args.get("input_data"))
 
             elif name == "sample_data":
@@ -184,10 +195,12 @@ class ActuarialAgent:
                 if where:
                     sql += f" WHERE {where}"
                 sql += " FETCH FIRST 10 ROWS ONLY"
+                log.info("Sampling: %s", sql)
                 return self.oracle.execute(sql)
 
             else:
                 return {"error": f"Unknown tool: {name}"}
 
         except Exception as e:
+            log.error("Tool %s failed: %s", name, e, exc_info=True)
             return {"error": str(e)}

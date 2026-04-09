@@ -4,8 +4,8 @@ import sys
 import os
 import yaml
 from dotenv import load_dotenv
-from PyQt5.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from PyQt5.QtGui import QFont, QPixmap, QColor, QPainter
+from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtCore import Qt
 
 
@@ -15,46 +15,42 @@ def load_config() -> dict:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     load_dotenv(os.path.join(base_dir, ".env"))
 
-    # Try local config first, fall back to default
     for name in ("config.local.yaml", "config.yaml"):
         path = os.path.join(base_dir, name)
         if os.path.exists(path):
             with open(path, "r") as f:
                 config = yaml.safe_load(f)
-            print(f"Loaded config from {name}")
 
-            # Override with environment variables if present
+            # Migrate old 'openai' config key to 'ai' if needed
+            if "openai" in config and "ai" not in config:
+                config["ai"] = config.pop("openai")
+                config["ai"]["provider"] = "openai"
+
+            # Override with environment variables
+            ai = config.setdefault("ai", {})
             if os.getenv("OPENAI_KEY"):
-                config.setdefault("openai", {})["api_key"] = os.getenv("OPENAI_KEY")
+                ai["api_key"] = os.getenv("OPENAI_KEY")
+            if os.getenv("AZURE_OPENAI_KEY"):
+                ai["api_key"] = os.getenv("AZURE_OPENAI_KEY")
+                ai.setdefault("provider", "azure")
+            if os.getenv("AZURE_OPENAI_ENDPOINT"):
+                ai["azure_endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+            if os.getenv("AI_BASE_URL"):
+                ai["base_url"] = os.getenv("AI_BASE_URL")
+                ai.setdefault("provider", "custom")
+
+            oracle = config.setdefault("oracle", {})
             if os.getenv("ORACLE_DSN"):
-                config.setdefault("oracle", {})["dsn"] = os.getenv("ORACLE_DSN")
+                oracle["dsn"] = os.getenv("ORACLE_DSN")
             if os.getenv("ORACLE_USER"):
-                config.setdefault("oracle", {})["user"] = os.getenv("ORACLE_USER")
+                oracle["user"] = os.getenv("ORACLE_USER")
             if os.getenv("ORACLE_PASSWORD"):
-                config.setdefault("oracle", {})["password"] = os.getenv("ORACLE_PASSWORD")
+                oracle["password"] = os.getenv("ORACLE_PASSWORD")
 
             return config
 
     print("ERROR: No config file found. Copy config.yaml to config.local.yaml and fill in credentials.")
     sys.exit(1)
-
-
-def validate_config(config: dict) -> list[str]:
-    """Check for required config values. Returns list of errors."""
-    errors = []
-    openai_cfg = config.get("openai", {})
-    if not openai_cfg.get("api_key") or openai_cfg["api_key"].startswith("YOUR_"):
-        errors.append("OpenAI API key not configured")
-
-    oracle_cfg = config.get("oracle", {})
-    if not oracle_cfg.get("dsn") or oracle_cfg["dsn"].startswith("YOUR_"):
-        errors.append("Oracle DSN not configured")
-    if not oracle_cfg.get("user") or oracle_cfg["user"].startswith("YOUR_"):
-        errors.append("Oracle username not configured")
-    if not oracle_cfg.get("password") or oracle_cfg["password"].startswith("YOUR_"):
-        errors.append("Oracle password not configured")
-
-    return errors
 
 
 def main():
@@ -82,25 +78,39 @@ def main():
     # Load config
     config = load_config()
 
-    # Check if Oracle is configured
+    # Setup logging
+    from core.logging_config import setup_logging
+    log_cfg = config.get("logging", {})
+    log = setup_logging(
+        log_dir=log_cfg.get("log_dir"),
+        level=log_cfg.get("level", "INFO"),
+    )
+    log.info("Actuarial Bot starting")
+    log.info("AI provider: %s, model: %s", config["ai"].get("provider", "openai"), config["ai"].get("model", "gpt-4o"))
+
+    # Validate AI key
+    ai_cfg = config.get("ai", {})
+    if not ai_cfg.get("api_key") or ai_cfg["api_key"].startswith("YOUR_"):
+        QMessageBox.critical(None, "Configuration Error", "AI API key not configured in .env or config.local.yaml.")
+        sys.exit(1)
+
+    # Create LLM client
+    from core.llm_client import create_llm_client
+    try:
+        llm_client, model_name = create_llm_client(ai_cfg)
+    except Exception as e:
+        log.error("Failed to create LLM client: %s", e)
+        QMessageBox.critical(None, "AI Configuration Error", f"Could not initialize AI client:\n\n{e}")
+        sys.exit(1)
+
+    # Oracle connection
+    from db.connection import OracleConnection
     oracle_cfg = config.get("oracle", {})
     oracle_configured = (
         oracle_cfg.get("dsn") and not oracle_cfg["dsn"].startswith("YOUR_")
         and oracle_cfg.get("user") and not oracle_cfg["user"].startswith("YOUR_")
         and oracle_cfg.get("password") and not oracle_cfg["password"].startswith("YOUR_")
     )
-
-    # Validate OpenAI key is present
-    openai_cfg = config.get("openai", {})
-    if not openai_cfg.get("api_key") or openai_cfg["api_key"].startswith("YOUR_"):
-        QMessageBox.critical(None, "Configuration Error", "OpenAI API key not configured in .env or config.local.yaml.")
-        sys.exit(1)
-
-    # Initialize components
-    from db.connection import OracleConnection
-    from executor.python_runner import PythonRunner
-    from core.agent import ActuarialAgent
-    from ui.chat_window import ChatWindow
 
     oracle_conn = None
     if oracle_configured:
@@ -111,28 +121,30 @@ def main():
         )
         try:
             oracle_conn.connect()
-            print("Oracle connection successful")
+            log.info("Oracle connection successful (DSN: %s)", oracle_cfg["dsn"])
         except Exception as e:
-            print(f"Warning: Oracle connection failed: {e}")
-            print("Running in demo mode (no database)")
+            log.warning("Oracle connection failed: %s", e)
             oracle_conn = None
     else:
-        print("Oracle not configured — running in demo mode (no database)")
+        log.info("Oracle not configured — running in demo mode")
 
+    # Python executor
+    from executor.python_runner import PythonRunner
     python_cfg = config.get("python", {})
     python_runner = PythonRunner(
         executable=python_cfg.get("executable", "python"),
         timeout=python_cfg.get("timeout", 120),
     )
 
-    openai_cfg = config["openai"]
+    # Agent
+    from core.agent import ActuarialAgent
     agent = ActuarialAgent(
-        api_key=openai_cfg["api_key"],
-        model=openai_cfg.get("model", "gpt-4o"),
+        client=llm_client,
+        model=model_name,
         oracle_conn=oracle_conn,
         python_runner=python_runner,
-        temperature=openai_cfg.get("temperature", 0.1),
-        max_tokens=openai_cfg.get("max_tokens", 4096),
+        temperature=ai_cfg.get("temperature", 0.1),
+        max_tokens=ai_cfg.get("max_tokens", 4096),
     )
     agent.max_rows = oracle_cfg.get("max_rows", 10000)
 
@@ -143,17 +155,20 @@ def main():
             for schema in schemas:
                 try:
                     tables = agent.schema.discover_tables(schema)
-                    print(f"Discovered {len(tables)} tables in schema {schema}")
+                    log.info("Discovered %d tables in schema %s", len(tables), schema)
                 except Exception as e:
-                    print(f"Warning: Could not discover schema {schema}: {e}")
+                    log.warning("Could not discover schema %s: %s", schema, e)
 
     # Launch UI
+    from ui.chat_window import ChatWindow
     window = ChatWindow(agent, config)
     if not oracle_conn:
         window.status.showMessage("Demo Mode — No Oracle connection (chat and Python still work)")
     window.show()
+    log.info("UI launched")
 
     ret = app.exec_()
+    log.info("Application exiting (code=%d)", ret)
     if oracle_conn:
         oracle_conn.close()
     sys.exit(ret)
