@@ -35,6 +35,11 @@ def load_config() -> dict:
                 ai.setdefault("provider", "azure")
             if os.getenv("AZURE_OPENAI_ENDPOINT"):
                 ai["azure_endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+            if os.getenv("DEPLOYMENT_NAME"):
+                ai["azure_deployment"] = os.getenv("DEPLOYMENT_NAME")
+                ai["model"] = os.getenv("DEPLOYMENT_NAME")
+            if os.getenv("AZURE_API_VERSION"):
+                ai["azure_api_version"] = os.getenv("AZURE_API_VERSION")
             if os.getenv("AI_BASE_URL"):
                 ai["base_url"] = os.getenv("AI_BASE_URL")
                 ai.setdefault("provider", "custom")
