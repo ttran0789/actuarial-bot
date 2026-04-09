@@ -1,0 +1,42 @@
+# Actuarial Bot Configuration
+# Copy this file to config.local.yaml and fill in your credentials
+
+openai:
+  api_key: "YOUR_OPENAI_API_KEY"
+  model: "gpt-4o"
+  temperature: 0.1
+  max_tokens: 4096
+
+oracle:
+  # TNS name from your tnsnames.ora
+  dsn: "YOUR_TNS_NAME"
+  user: "YOUR_USERNAME"
+  password: "YOUR_PASSWORD"
+  # Schemas to auto-discover on connect (leave empty for current user schema)
+  schemas: []
+  # Max rows returned per query (safety limit)
+  max_rows: 10000
+
+# Python executor settings
+python:
+  # Path to python executable (uses system python if not set)
+  executable: "python"
+  # Timeout in seconds for script execution
+  timeout: 120
+  # Packages available in executor environment
+  packages:
+    - pandas
+    - numpy
+    - openpyxl
+    - matplotlib
+
+# UI settings
+ui:
+  theme: "dark"
+  font_size: 11
+  max_table_rows_display: 500
+
+# Export settings
+export:
+  default_directory: "~/Documents"
+  excel_engine: "openpyxl"
