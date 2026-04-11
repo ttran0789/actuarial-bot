@@ -146,7 +146,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file from the user's local filesystem. Supports CSV, Excel (.xlsx/.xls), and text files. For large files, returns the first 100 rows as a preview. Use this when the user provides a file path or asks you to look at a local file.",
+            "description": "Read a file from the user's local filesystem. Supports CSV, Excel (.xlsx/.xls), Parquet, and text files. For large files, returns the first 100 rows as a preview. Use this when the user provides a file path or asks you to look at a local file.",
             "parameters": {
                 "type": "object",
                 "properties": {

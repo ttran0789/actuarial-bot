@@ -249,9 +249,13 @@ class ActuarialAgent:
                 df = pd.read_excel(file_path, **kwargs)
                 df_full = pd.read_excel(file_path, sheet_name=sheet_name or 0, usecols=[0])
                 total_rows = len(df_full)
+            elif ext == ".parquet":
+                df_full = pd.read_parquet(file_path)
+                total_rows = len(df_full)
+                df = df_full.head(max_rows)
             elif ext in (".txt", ".log", ".sql", ".json", ".xml"):
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(50000)  # 50KB limit for text files
+                    content = f.read(50000)
                 return {
                     "file_path": file_path,
                     "file_type": ext,
@@ -260,7 +264,7 @@ class ActuarialAgent:
                     "truncated": file_size > 50000,
                 }
             else:
-                return {"error": f"Unsupported file type: {ext}. Supported: .csv, .xlsx, .xls, .txt, .log, .sql, .json, .xml"}
+                return {"error": f"Unsupported file type: {ext}. Supported: .csv, .xlsx, .xls, .parquet, .txt, .log, .sql, .json, .xml"}
 
             columns = list(df.columns)
             rows = df.where(df.notna(), None).values.tolist()
