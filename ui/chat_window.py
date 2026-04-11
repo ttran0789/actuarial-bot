@@ -11,7 +11,7 @@ from PyQt5.QtGui import QFont, QKeyEvent
 
 from core.agent import ActuarialAgent
 from ui.message_widgets import (
-    ChatBubble, SQLBlock, ResultTable, WarningBanner, ToolCallIndicator,
+    ChatBubble, SQLBlock, ResultTable, WarningBanner, ToolCallIndicator, ImageWidget,
 )
 from ui.export import copy_to_clipboard, export_to_excel, export_and_open
 
@@ -244,8 +244,19 @@ class ChatWindow(QMainWindow):
             if result.get("stderr") and not result.get("success"):
                 self._add_widget(WarningBanner(f"Python error:\n{result['stderr'][:2000]}"))
             if result.get("output_files"):
-                files = ", ".join(f["name"] for f in result["output_files"])
-                self._add_widget(ChatBubble(f"Generated files: {files}", is_user=False))
+                import os
+                image_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg"}
+                non_images = []
+                for f in result["output_files"]:
+                    ext = os.path.splitext(f["name"])[1].lower()
+                    if ext in image_exts:
+                        img_widget = ImageWidget(f["path"], caption=f["name"])
+                        img_widget.open_file.connect(lambda p: __import__("os").startfile(p))
+                        self._add_widget(img_widget)
+                    else:
+                        non_images.append(f["name"])
+                if non_images:
+                    self._add_widget(ChatBubble(f"Generated files: {', '.join(non_images)}", is_user=False))
 
         elif msg_type == "tool_result":
             pass  # Tool results are consumed by the agent, not shown directly

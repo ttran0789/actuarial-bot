@@ -100,7 +100,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_python",
-            "description": "Execute a Python script for data analysis, visualization, or transformation. The script runs in a subprocess with pandas, numpy, openpyxl, matplotlib available. Use 'input_data' to pass CSV data, or write results to files in the current directory.",
+            "description": "Execute a Python script for data analysis, visualization, or transformation. The script runs in a subprocess with pandas, numpy, openpyxl, matplotlib available. Use 'input_data' to pass CSV data, or write results to files in the current directory. For charts, save with plt.savefig('chart.png', dpi=150, bbox_inches='tight') — images are displayed inline in the chat.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -189,4 +189,5 @@ SYSTEM_PROMPT = """You are an actuarial data analyst assistant with access to an
 - Explain your reasoning and the SQL logic to the user.
 - If results look suspicious, say so and suggest verification steps.
 - For large results, suggest Python analysis or Excel export.
+- When generating charts, always use matplotlib and save with plt.savefig('chart.png', dpi=150, bbox_inches='tight'). The image will be displayed inline in the chat. Use plt.style.use('dark_background') for consistency with the dark UI.
 """

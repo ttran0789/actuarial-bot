@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QPushButton, QHeaderView, QFrame, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter
+from PyQt5.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QPixmap
 
 
 class SQLHighlighter(QSyntaxHighlighter):
@@ -282,3 +282,59 @@ class ToolCallIndicator(QFrame):
         label = QLabel(f"Calling: {tool_name}")
         label.setStyleSheet("color: #808080; font-size: 11px; font-style: italic;")
         layout.addWidget(label)
+
+
+class ImageWidget(QFrame):
+    """Displays an image inline in the chat with an open button."""
+
+    open_file = pyqtSignal(str)
+
+    def __init__(self, image_path: str, caption: str = "", max_width: int = 700, parent=None):
+        super().__init__(parent)
+        self.image_path = image_path
+        self.setStyleSheet("""
+            ImageWidget {
+                background-color: #1E1E1E;
+                border: 1px solid #3C3C3C;
+                border-radius: 6px;
+                margin: 4px 40px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # Load and display image
+        pixmap = QPixmap(image_path)
+        if not pixmap.isNull():
+            if pixmap.width() > max_width:
+                pixmap = pixmap.scaledToWidth(max_width, Qt.SmoothTransformation)
+            img_label = QLabel()
+            img_label.setPixmap(pixmap)
+            img_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(img_label)
+        else:
+            err_label = QLabel(f"Could not load image: {image_path}")
+            err_label.setStyleSheet("color: #FF6B6B;")
+            layout.addWidget(err_label)
+
+        # Caption and buttons
+        btn_layout = QHBoxLayout()
+        if caption:
+            cap_label = QLabel(caption)
+            cap_label.setStyleSheet("color: #808080; font-size: 11px;")
+            btn_layout.addWidget(cap_label)
+        btn_layout.addStretch()
+
+        open_btn = QPushButton("Open")
+        open_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0E639C; color: white; border: none;
+                border-radius: 4px; padding: 4px 12px; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #1177BB; }
+        """)
+        open_btn.clicked.connect(lambda: self.open_file.emit(self.image_path))
+        btn_layout.addWidget(open_btn)
+
+        layout.addLayout(btn_layout)
