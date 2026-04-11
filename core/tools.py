@@ -127,11 +127,28 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a file from the user's local filesystem. Supports CSV, Excel (.xlsx/.xls), and text files. For large files, returns the first 100 rows as a preview. Use this when the user provides a file path or asks you to look at a local file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the file (e.g., C:/Users/tuan/data/file.csv)."},
+                    "max_rows": {"type": "integer", "description": "Maximum rows to return for preview (default 100)."},
+                    "sheet_name": {"type": "string", "description": "Sheet name for Excel files (default: first sheet)."},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """You are an actuarial data analyst assistant with access to an Oracle database containing insurance data. You help users query, analyze, and understand actuarial data.
 
 ## Your Capabilities
+- Read local files (CSV, Excel, text) from the user's filesystem
 - Discover and explore database schemas, tables, and relationships
 - Write and execute SQL queries against Oracle
 - Run Python scripts for data analysis and visualization

@@ -132,6 +132,18 @@ class ActuarialAgent:
                         result_str = result_to_json(result_content)
                     else:
                         result_str = json.dumps(result_content) if isinstance(result_content, dict) else str(result_content)
+                elif fn_name == "read_file":
+                    if isinstance(result_content, dict) and "columns" in result_content:
+                        text = format_result_as_text(result_content)
+                        yield {"type": "query_result", "result": result_content, "text": text}
+                        self.last_result = result_content
+                        result_str = result_to_json(result_content)
+                    elif isinstance(result_content, dict) and "content" in result_content:
+                        # Text file — show as chat bubble
+                        yield {"type": "text", "content": f"**File: {result_content['file_path']}**\n```\n{result_content['content'][:3000]}\n```"}
+                        result_str = json.dumps(result_content)
+                    else:
+                        result_str = json.dumps(result_content) if isinstance(result_content, dict) else str(result_content)
                 elif fn_name == "run_python":
                     log.info("Python execution: success=%s", result_content.get("success"))
                     if result_content.get("stderr"):
@@ -198,9 +210,69 @@ class ActuarialAgent:
                 log.info("Sampling: %s", sql)
                 return self.oracle.execute(sql)
 
+            elif name == "read_file":
+                return self._read_file(args["file_path"], args.get("max_rows", 100), args.get("sheet_name"))
+
             else:
                 return {"error": f"Unknown tool: {name}"}
 
         except Exception as e:
             log.error("Tool %s failed: %s", name, e, exc_info=True)
             return {"error": str(e)}
+
+    def _read_file(self, file_path: str, max_rows: int = 100, sheet_name: str = None):
+        """Read a local file and return its contents as a structured result."""
+        import os
+        import pandas as pd
+
+        file_path = file_path.strip().strip('"').strip("'")
+        # Handle file:/// URLs
+        if file_path.startswith("file:///"):
+            file_path = file_path[8:]
+
+        if not os.path.exists(file_path):
+            return {"error": f"File not found: {file_path}"}
+
+        ext = os.path.splitext(file_path)[1].lower()
+        file_size = os.path.getsize(file_path)
+        log.info("Reading file: %s (%s, %.1f KB)", file_path, ext, file_size / 1024)
+
+        try:
+            if ext == ".csv":
+                df = pd.read_csv(file_path, nrows=max_rows)
+                total_rows = sum(1 for _ in open(file_path, encoding="utf-8", errors="ignore")) - 1
+            elif ext in (".xlsx", ".xls"):
+                kwargs = {"sheet_name": sheet_name or 0, "nrows": max_rows}
+                df = pd.read_excel(file_path, **kwargs)
+                df_full = pd.read_excel(file_path, sheet_name=sheet_name or 0, usecols=[0])
+                total_rows = len(df_full)
+            elif ext in (".txt", ".log", ".sql", ".json", ".xml"):
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read(50000)  # 50KB limit for text files
+                return {
+                    "file_path": file_path,
+                    "file_type": ext,
+                    "size_kb": round(file_size / 1024, 1),
+                    "content": content,
+                    "truncated": file_size > 50000,
+                }
+            else:
+                return {"error": f"Unsupported file type: {ext}. Supported: .csv, .xlsx, .xls, .txt, .log, .sql, .json, .xml"}
+
+            columns = list(df.columns)
+            rows = df.where(df.notna(), None).values.tolist()
+
+            return {
+                "file_path": file_path,
+                "file_type": ext,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "total_rows": total_rows,
+                "truncated": total_rows > max_rows,
+                "dtypes": {col: str(df[col].dtype) for col in columns},
+            }
+
+        except Exception as e:
+            log.error("Failed to read file %s: %s", file_path, e)
+            return {"error": f"Failed to read file: {e}"}
