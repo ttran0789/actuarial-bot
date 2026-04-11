@@ -113,6 +113,9 @@ class ActuarialAgent:
                 elif isinstance(result_content, list):
                     log.info("Tool %s returned %d items", fn_name, len(result_content))
 
+                # Ensure result_str is always set for tool response message
+                result_str = json.dumps(result_content) if isinstance(result_content, (dict, list)) else str(result_content)
+
                 # Yield specialized results based on tool type
                 if fn_name == "preview_query":
                     yield {"type": "sql_preview", "sql": args.get("sql", ""), "explanation": args.get("explanation", "")}
