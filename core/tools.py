@@ -130,6 +130,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "list_directory",
+            "description": "List files and folders in a local directory. Use this when the user asks you to look at a folder, see what files are available, or explore a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dir_path": {"type": "string", "description": "Absolute path to the directory."},
+                    "pattern": {"type": "string", "description": "Optional glob pattern to filter files (e.g., '*.csv', '*.xlsx'). Default: all files."},
+                },
+                "required": ["dir_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
             "description": "Read a file from the user's local filesystem. Supports CSV, Excel (.xlsx/.xls), and text files. For large files, returns the first 100 rows as a preview. Use this when the user provides a file path or asks you to look at a local file.",
             "parameters": {

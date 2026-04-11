@@ -210,6 +210,9 @@ class ActuarialAgent:
                 log.info("Sampling: %s", sql)
                 return self.oracle.execute(sql)
 
+            elif name == "list_directory":
+                return self._list_directory(args["dir_path"], args.get("pattern"))
+
             elif name == "read_file":
                 return self._read_file(args["file_path"], args.get("max_rows", 100), args.get("sheet_name"))
 
@@ -276,3 +279,35 @@ class ActuarialAgent:
         except Exception as e:
             log.error("Failed to read file %s: %s", file_path, e)
             return {"error": f"Failed to read file: {e}"}
+
+    def _list_directory(self, dir_path: str, pattern: str = None):
+        """List files in a directory with size and type info."""
+        import os
+        import glob as glob_mod
+
+        dir_path = dir_path.strip().strip('"').strip("'")
+        if not os.path.exists(dir_path):
+            return {"error": f"Directory not found: {dir_path}"}
+        if not os.path.isdir(dir_path):
+            return {"error": f"Not a directory: {dir_path}. Use read_file instead."}
+
+        log.info("Listing directory: %s (pattern: %s)", dir_path, pattern)
+
+        if pattern:
+            paths = glob_mod.glob(os.path.join(dir_path, pattern))
+        else:
+            paths = [os.path.join(dir_path, f) for f in os.listdir(dir_path)]
+
+        entries = []
+        for p in sorted(paths):
+            name = os.path.basename(p)
+            is_dir = os.path.isdir(p)
+            size = os.path.getsize(p) if not is_dir else None
+            entries.append({
+                "name": name,
+                "type": "directory" if is_dir else os.path.splitext(name)[1].lower(),
+                "size_kb": round(size / 1024, 1) if size else None,
+                "path": p,
+            })
+
+        return {"dir_path": dir_path, "count": len(entries), "entries": entries}
